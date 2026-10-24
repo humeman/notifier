@@ -3,16 +3,19 @@ package com.csenneff.notifier
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import com.google.firebase.messaging.FirebaseMessaging
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Hosts Flutter and exposes AlertNotifier over a method channel. Also relays
- * notification taps: the launching intent is read once via `initialAlertId`,
- * later taps arrive through [onNewIntent] and are pushed as `opened`.
+ * Hosts Flutter and exposes AlertNotifier and the FCM token over a method
+ * channel. Also relays events to Dart: notification taps (the launching intent
+ * is read once via `initialAlertId`, later taps arrive through [onNewIntent]
+ * as `opened`), pushes received while open (`received`), and token rotations
+ * (`token`).
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterActivity(), NotifierMessagingService.Listener {
 
     private lateinit var channel: MethodChannel
     private val notifier by lazy { AlertNotifier(applicationContext) }
@@ -36,6 +39,9 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "requestPermission" -> requestPermission(result)
+                "fcmToken" -> FirebaseMessaging.getInstance().token
+                    .addOnSuccessListener { result.success(it) }
+                    .addOnFailureListener { result.error("fcm", it.message, null) }
                 "initialAlertId" -> {
                     result.success(intent.getStringExtra(AlertNotifier.EXTRA_ALERT_ID))
                     // Consumed: a rotation or re-attach shouldn't reopen it.
@@ -44,6 +50,26 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        NotifierMessagingService.listener = this
+    }
+
+    override fun onStop() {
+        if (NotifierMessagingService.listener === this) {
+            NotifierMessagingService.listener = null
+        }
+        super.onStop()
+    }
+
+    override fun onAlertReceived(id: String) {
+        channel.invokeMethod("received", id)
+    }
+
+    override fun onTokenChanged(token: String) {
+        channel.invokeMethod("token", token)
     }
 
     override fun onNewIntent(intent: Intent) {

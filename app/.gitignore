@@ -52,3 +52,7 @@ dist/
 
 # Taskfile fingerprint cache
 .task/
+
+# Environment-specific, written by `task app:config` from terraform outputs.
+android/app/google-services.json
+config/

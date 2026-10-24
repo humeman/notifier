@@ -12,6 +12,12 @@ vars:
   APK: build/app/outputs/flutter-apk/app-release.apk
   DIST: dist/notifier.apk
   APP_ID: com.csenneff.notifier
+  ENV: '{{.ENV | default "dev"}}'
+  # humeman/terraform checkout, for `task config`.
+  TF_REPO: '{{.TF_REPO | default (printf "%s/Code/terraform" .HOME)}}'
+  # API URL + app key, written by `task config`. Without it the app runs on
+  # mock data.
+  DEFINES: '$([ -f config/notifier.json ] && echo --dart-define-from-file=config/notifier.json)'
   # Pinned to the SDK's own adb, so a second copy on PATH can't conflict.
   ADB: '{{.ANDROID_SDK}}/platform-tools/adb'
   # Emulator. `task app:emulator:setup` downloads the image and creates the AVD.
@@ -26,6 +32,11 @@ env:
   JAVA_HOME: '{{.JAVA_HOME}}'
 
 tasks:
+  config:
+    desc: 'Write google-services.json + API config from terraform outputs (ENV=dev|prod)'
+    cmds:
+      - tool/config.sh "{{.ENV}}" "{{.TF_REPO}}"
+
   deps:
     desc: 'Resolve Dart dependencies'
     cmds:
@@ -35,7 +46,8 @@ tasks:
     desc: 'Build the release APK into dist/'
     deps: [deps]
     cmds:
-      - '{{.FLUTTER}} build apk --release'
+      - test -f android/app/google-services.json || (echo "Run 'task app:config' first." >&2; exit 1)
+      - '{{.FLUTTER}} build apk --release {{.DEFINES}}'
       - mkdir -p dist
       - cp "{{.APK}}" "{{.DIST}}"
       - 'echo "APK: {{.DIST}} ($(du -h "{{.DIST}}" | cut -f1))"'
@@ -50,7 +62,7 @@ tasks:
     desc: 'Run on the connected device with hot reload'
     deps: [deps]
     cmds:
-      - '{{.FLUTTER}} run'
+      - '{{.FLUTTER}} run {{.DEFINES}}'
 
   test:
     desc: 'Run unit and widget tests'
@@ -92,7 +104,7 @@ tasks:
     cmds:
       - task: emulator:setup
       - task: emulator:start
-      - '{{.FLUTTER}} run -d {{.EMULATOR_SERIAL}}'
+      - '{{.FLUTTER}} run -d {{.EMULATOR_SERIAL}} {{.DEFINES}}'
 
   emulator:setup:
     desc: 'Install the emulator + Android 17 image and create the AVD (one-time)'

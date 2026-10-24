@@ -10,7 +10,7 @@ system ──POST /v1/notify (Bearer <system key>)──▶ Cloud Run Function (
                                                     │ key hash → system name (Secret Manager)
                                                     │ store alert (Firestore, 90-day TTL)
                                                     │ FCM high-priority data message ──▶ phone
-phone ──GET /v1/notifications[/id] (app key)─────▶ same function
+phone ──GET /v1/alerts[/id] (app key)────────────▶ same function
 ```
 
 FCM only carries `id`, `system`, `level`, and `title`; the description is
@@ -46,6 +46,8 @@ curl -X POST "$NOTIFIER_URL/v1/notify" \
 
 Uses [`task`](https://taskfile.dev/); each component's Taskfile is included
 under its folder name. Run `task` for the full list. Common targets:
+- `task app:config ENV=dev|prod`: pull `google-services.json` and the API
+  config from terraform outputs (needed before building)
 - `task app:build`: release APK into `app/dist/notifier.apk`
 - `task app:test` / `task app:analyze`
 - `task app:emulator:install`: build, boot the Android 17 emulator, install, launch
@@ -59,12 +61,109 @@ level through the same native code a push will use.
 
 ## setup
 
-- Do something in FCM
-- Get some JSON back
-- ...
-- ???
-- Profit
+### 1. infrastructure
+
+Everything in GCP (Firebase project + Android app, FCM, Firestore with the
+90-day TTL, the `notifier` service account, keys, alert policies) is the
+`notifier` module in [humeman/terraform](https://github.com/humeman/terraform)
+(`tf/modules/notifier`). There's no manual Firebase console setup: FCM sends
+authorize with the function's service account, so there's no server key.
+
+Systems are listed in `tf/projects/<env>/project.tf`:
+
+```hcl
+module "notifier" {
+  ...
+  systems = ["homelab", "backups"]
+}
+```
+
+Merging to `main` applies dev; prod is the manual `Apply Prod` workflow.
+
+### 2. deploy the function
+
+```sh
+task function:deploy ENV=dev
+```
+
+Deploys with your gcloud login as the `notifier` service account and prints
+the URL (`https://us-central1-csenneff-<env>.cloudfunctions.net/notifier`).
+It's public (`--allow-unauthenticated`); the keys are the auth.
+
+### 3. get the keys
+
+From `tf/projects/<env>` in the terraform repo (same Docker/credentials setup
+as its Taskfile):
+
+```sh
+terraform output -json notifier_system_keys   # {"homelab": "<key>", ...}
+terraform output -raw notifier_app_key
+```
+
+Give each system its key; it sends `Authorization: Bearer <key>`. Adding or
+removing a system is a terraform change; the function picks up the new keys
+secret within 5 minutes, no redeploy. To rotate one key, `terraform apply
+-replace='module.notifier.random_password.system_key["homelab"]'`; bump
+`key_generation` to rotate all of them.
+
+### 4. build and install the app
+
+```sh
+task app:config ENV=dev     # google-services.json + config/notifier.json (both gitignored)
+task app:build              # app/dist/notifier.apk
+```
+
+`app:config` reads terraform outputs using `sa/csenneff-<env>.json` from the
+terraform repo if present, else your gcloud login. Sideload the APK (it's
+signed with the debug key; Android 17+ only). On first launch it asks for
+notification permission and registers its FCM token with the function.
+
+### 5. custom domain via Cloudflare (optional)
+
+Cloud Run routes on the `Host` header, so a plain proxied CNAME to the
+function returns 404. Two ways around it:
+
+**Cloudflare Worker (recommended).** Keeps the orange cloud (WAF, rate
+limiting) and works on the free plan:
+
+1. Workers & Pages → Create → Worker, named e.g. `notifier-proxy`, with:
+
+   ```js
+   // Forwards notifier.csenneff.dev/* to the Cloud Run function.
+   const ORIGIN = "https://us-central1-csenneff-prod.cloudfunctions.net/notifier";
+
+   export default {
+     async fetch(request) {
+       const url = new URL(request.url);
+       return fetch(ORIGIN + url.pathname + url.search, request);
+     },
+   };
+   ```
+
+2. Worker → Settings → Domains & Routes → Add → Custom domain:
+   `notifier.csenneff.dev`. Cloudflare creates the DNS record and certificate.
+3. Check it: `curl -i https://notifier.csenneff.dev/v1/alerts` should return
+   `401 {"error": "invalid or missing key"}` (the function answering).
+
+Optionally add a WAF rate-limiting rule on `notifier.csenneff.dev/v1/*`.
+
+**Cloud Run domain mapping (no Worker).** Still in Preview, but supported in
+us-central1:
+
+1. Verify `csenneff.dev` for your Google account (`gcloud domains verify
+   csenneff.dev`; adds a TXT record in Cloudflare).
+2. `gcloud beta run domain-mappings create --service=notifier
+   --domain=notifier.csenneff.dev --region=us-central1 --project=csenneff-prod`
+3. In Cloudflare, add `CNAME notifier → ghs.googlehosted.com` as **DNS only**
+   (grey cloud) — Google has to see its own records to issue the certificate,
+   which can take up to 24h.
+
+Either way, senders can use `https://notifier.csenneff.dev/v1/notify`. The
+app keeps talking to the function URL from terraform, which is fine; to point
+it at the custom domain instead, edit `NOTIFIER_URL` in
+`app/config/notifier.json` after `task app:config` and rebuild.
 
 ## terraform
 
-Link to the module in [humeman/terraform](https://github.com/humeman/terraform)
+[`tf/modules/notifier`](https://github.com/humeman/terraform/tree/main/tf/modules/notifier)
+in humeman/terraform.

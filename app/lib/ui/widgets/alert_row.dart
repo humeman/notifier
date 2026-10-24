@@ -68,7 +68,7 @@ class AlertRow extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (alert.description != null) ...[
+                  if (alert.hasDescription) ...[
                     const SizedBox(height: 6),
                     Row(
                       children: [

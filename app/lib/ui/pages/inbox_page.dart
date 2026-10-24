@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/formatting.dart';
 import '../../data/alert.dart';
+import '../../data/alert_repository.dart';
 import '../../state/alerts_controller.dart';
 import '../../theme/palette.dart';
 import '../widgets/alert_row.dart';
@@ -56,6 +57,7 @@ class InboxPage extends StatelessWidget {
 
     final alerts = controller.visible;
     final children = <Widget>[
+      if (controller.repository is MockAlertRepository) const _MockNotice(),
       _LevelFilterBar(controller: controller),
       if (alerts.isEmpty)
         const EmptyState(message: 'Nothing here. Quiet is good.', height: 240),
@@ -92,6 +94,32 @@ void openAlert(BuildContext context, String id) {
   context.read<AlertsController>().markRead(id);
   Navigator.of(context)
       .push(MaterialPageRoute(builder: (_) => AlertDetailPage(alertId: id)));
+}
+
+/// Says the inbox is canned data, so a build without config isn't mistaken
+/// for a quiet backend.
+class _MockNotice extends StatelessWidget {
+  const _MockNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, size: 12, color: Palette.textFaint),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Mock data: built without NOTIFIER_URL / NOTIFIER_APP_KEY.',
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: Palette.textFaint),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _CountPill extends StatelessWidget {

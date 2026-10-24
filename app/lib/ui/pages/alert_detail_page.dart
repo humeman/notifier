@@ -12,17 +12,40 @@ import '../widgets/section.dart';
 
 /// Full view of one alert, including its description (logs, traces) in a
 /// selectable, horizontally scrollable code block.
-class AlertDetailPage extends StatelessWidget {
+class AlertDetailPage extends StatefulWidget {
   const AlertDetailPage({super.key, required this.alertId});
 
   final String alertId;
 
   @override
+  State<AlertDetailPage> createState() => _AlertDetailPageState();
+}
+
+class _AlertDetailPageState extends State<AlertDetailPage> {
+  /// True until the full alert (with description) has been fetched, or it's
+  /// known there's nothing more to fetch.
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<AlertsController>().loadDetail(widget.alertId).whenComplete(
+      () {
+        if (mounted) setState(() => _loading = false);
+      },
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final alert = context.select<AlertsController, Alert?>(
-      (c) => c.byId(alertId),
+      (c) => c.byId(widget.alertId),
     );
     final theme = Theme.of(context);
+
+    if (alert == null && _loading) {
+      return const Scaffold(body: LoadingState());
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -76,7 +99,11 @@ class AlertDetailPage extends StatelessWidget {
                         : _CopyButton(text: alert.description!),
                     child: alert.description == null
                         ? Text(
-                            'No description was sent with this alert.',
+                            alert.hasDescription
+                                ? (_loading
+                                      ? 'Loading details…'
+                                      : 'Could not load details.')
+                                : 'No description was sent with this alert.',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: Palette.textFaint,
                             ),

@@ -1,12 +1,18 @@
 import 'alert.dart';
 
-/// Where alerts come from. The real implementation talks to the notifier
-/// function; [MockAlertRepository] stands in until that exists.
+/// Where alerts come from: [ApiAlertRepository] (the notifier function) in
+/// real builds, [MockAlertRepository] when no API is configured.
 abstract interface class AlertRepository {
-  /// Most recent first.
+  /// Most recent first. May omit descriptions; see [Alert.needsDetail].
   Future<List<Alert>> list();
 
+  /// One alert in full, including its description.
   Future<Alert?> get(String id);
+
+  Future<void> markRead(String id);
+
+  /// Registers this device's FCM token so it receives pushes.
+  Future<void> registerDevice(String token);
 }
 
 /// Canned alerts covering every level, with and without descriptions, spread
@@ -26,6 +32,12 @@ class MockAlertRepository implements AlertRepository {
     }
     return null;
   }
+
+  @override
+  Future<void> markRead(String id) async {}
+
+  @override
+  Future<void> registerDevice(String token) async {}
 
   static List<Alert> _seed(DateTime now) => [
     Alert(
