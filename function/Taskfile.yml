@@ -4,12 +4,6 @@ vars:
   ENV: '{{.ENV | default "dev"}}'
   PROJECT_ID: 'csenneff-{{.ENV}}'
   REGION: us-central1
-  FUNCTION_NAME: notifier
-  RUNTIME: python313
-  # Created by the terraform notifier module.
-  SERVICE_ACCOUNT: 'notifier@{{.PROJECT_ID}}.iam.gserviceaccount.com'
-  KEYS_SECRET_NAME: notifier-keys
-  RETENTION_DAYS: '90'
   PORT: '{{.PORT | default "8080"}}'
   # `task run` only. The plaintext keys are local-homelab-key,
   # local-backups-key (senders) and local-app-key (app); these are their
@@ -49,29 +43,14 @@ tasks:
       - .venv/bin/functions-framework --target=handle_request --source=src/main.py --port={{.PORT}} --debug
 
   deploy:
-    desc: 'Deploy the function (ENV=dev|prod, default dev)'
+    desc: 'Deploy the function (ENV=dev|prod, default dev); CI runs the same script'
+    env:
+      PROJECT_ID: '{{.PROJECT_ID}}'
+      REGION: '{{.REGION}}'
     cmds:
-      # gcloud reads requirements.txt from --source; copied in, then removed.
-      - cp requirements.txt src/requirements.txt
-      - defer: rm -f src/requirements.txt
-      - |
-        gcloud functions deploy "{{.FUNCTION_NAME}}" \
-          --project="{{.PROJECT_ID}}" \
-          --region="{{.REGION}}" \
-          --gen2 \
-          --runtime="{{.RUNTIME}}" \
-          --source=src \
-          --entry-point=handle_request \
-          --service-account="{{.SERVICE_ACCOUNT}}" \
-          --set-env-vars="PROJECT_ID={{.PROJECT_ID}},KEYS_SECRET_NAME={{.KEYS_SECRET_NAME}},RETENTION_DAYS={{.RETENTION_DAYS}}" \
-          --trigger-http \
-          --allow-unauthenticated \
-          --memory=256Mi \
-          --max-instances=3 \
-          --concurrency=1
-      - 'echo "URL: $(gcloud functions describe {{.FUNCTION_NAME}} --project={{.PROJECT_ID}} --region={{.REGION}} --gen2 --format="value(url)")"'
+      - ../ci/scripts/deploy-function.sh
 
   logs:
     desc: 'Tail recent function logs (ENV=dev|prod)'
     cmds:
-      - gcloud functions logs read "{{.FUNCTION_NAME}}" --project="{{.PROJECT_ID}}" --region="{{.REGION}}" --gen2 --limit=50
+      - gcloud functions logs read notifier --project="{{.PROJECT_ID}}" --region="{{.REGION}}" --gen2 --limit=50

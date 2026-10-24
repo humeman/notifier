@@ -21,6 +21,7 @@ notifications itself (`AlertNotifier.kt`), one channel per level.
 
 - `app/`: Flutter Android app (Android 17+). See `app/Taskfile.yml`.
 - `function/`: Cloud Run Function (Python). See `function/Taskfile.yml`.
+- `ci/scripts/`: deploy script shared by CI and `task function:deploy`.
 
 ## api
 
@@ -82,13 +83,24 @@ Merging to `main` applies dev; prod is the manual `Apply Prod` workflow.
 
 ### 2. deploy the function
 
+CI does this (`.github/workflows`, same pattern as humeman/financials):
+
+- every push to `main` runs the function and app tests, then deploys to dev
+- `Deploy to Prod` is run by hand (Actions → Deploy to Prod → Run workflow)
+- PRs run the tests only
+
+Both deploy jobs use the `GCLOUD_SERVICE_ACCOUNT` secret (a service account
+key JSON) from the repo's `dev`/`prod` environments. Locally, the same script
+runs with your gcloud login:
+
 ```sh
 task function:deploy ENV=dev
 ```
 
-Deploys with your gcloud login as the `notifier` service account and prints
-the URL (`https://us-central1-csenneff-<env>.cloudfunctions.net/notifier`).
-It's public (`--allow-unauthenticated`); the keys are the auth.
+The function runs as the `notifier` service account at
+`https://us-central1-csenneff-<env>.cloudfunctions.net/notifier`. It's public
+(`--allow-unauthenticated`); the keys are the auth. The deploy fails if the
+URL doesn't answer `401` to an unauthenticated request afterwards.
 
 ### 3. get the keys
 

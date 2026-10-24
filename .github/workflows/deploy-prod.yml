@@ -1,0 +1,34 @@
+name: Deploy to Prod
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GCLOUD_SERVICE_ACCOUNT }}'
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Cloud Function
+        env:
+          PROJECT_ID: csenneff-prod
+          REGION: us-central1
+        run: ./ci/scripts/deploy-function.sh

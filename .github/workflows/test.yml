@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [main]
+  # Reused by the deploy workflows, so nothing deploys without passing.
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  function:
+    name: Function tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: function/requirements*.txt
+
+      - name: Install dependencies
+        working-directory: function
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: function
+        run: python -m pytest -q
+
+  app:
+    name: App analyze + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.8'
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: Run tests
+        working-directory: app
+        run: flutter test
