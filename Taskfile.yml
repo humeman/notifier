@@ -1,11 +1,14 @@
 version: '3'
 
 # Each component owns its own Taskfile; this one just namespaces them, e.g.
-# `task app:build`, `task app:emulator:install`.
+# `task app:build`, `task function:deploy ENV=prod`.
 includes:
   app:
     taskfile: ./app/Taskfile.yml
     dir: ./app
+  function:
+    taskfile: ./function/Taskfile.yml
+    dir: ./function
 
 tasks:
   default:

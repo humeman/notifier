@@ -1,0 +1,77 @@
+version: '3'
+
+vars:
+  ENV: '{{.ENV | default "dev"}}'
+  PROJECT_ID: 'csenneff-{{.ENV}}'
+  REGION: us-central1
+  FUNCTION_NAME: notifier
+  RUNTIME: python313
+  # Created by the terraform notifier module.
+  SERVICE_ACCOUNT: 'notifier@{{.PROJECT_ID}}.iam.gserviceaccount.com'
+  KEYS_SECRET_NAME: notifier-keys
+  RETENTION_DAYS: '90'
+  PORT: '{{.PORT | default "8080"}}'
+  # `task run` only. The plaintext keys are local-homelab-key,
+  # local-backups-key (senders) and local-app-key (app); these are their
+  # SHA-256 hashes, in the same shape Terraform writes to the real secret.
+  LOCAL_KEYS_JSON: >-
+    {"systems": {
+    "f3545521ef1b82714a576023f165fd9b25ebca8c1d1142b971704553a0d93282": "homelab",
+    "f425aa22e448e05aa7ec4e36c3d489294188b1c1ee9f9ff0c5a2ebccc82b3bb3": "backups"},
+    "app": "ad728ee4342b94e7f20252f6f7e83f1d319cef55a379a9c516fca880d56faecf"}
+
+tasks:
+  venv:
+    desc: 'Create a virtualenv and install dependencies'
+    sources:
+      - requirements.txt
+      - requirements-dev.txt
+    generates:
+      - .venv/bin/python
+    cmds:
+      - python3 -m venv .venv
+      - .venv/bin/pip install -q --upgrade pip
+      - .venv/bin/pip install -q -r requirements-dev.txt
+
+  test:
+    desc: 'Run unit tests'
+    deps: [venv]
+    cmds:
+      - .venv/bin/python -m pytest -q
+
+  run:
+    desc: 'Run locally with an in-memory store and no FCM (see LOCAL_KEYS_JSON)'
+    deps: [venv]
+    env:
+      NOTIFIER_LOCAL: '1'
+      NOTIFIER_KEYS_JSON: '{{.LOCAL_KEYS_JSON}}'
+    cmds:
+      - .venv/bin/functions-framework --target=handle_request --source=src/main.py --port={{.PORT}} --debug
+
+  deploy:
+    desc: 'Deploy the function (ENV=dev|prod, default dev)'
+    cmds:
+      # gcloud reads requirements.txt from --source; copied in, then removed.
+      - cp requirements.txt src/requirements.txt
+      - defer: rm -f src/requirements.txt
+      - |
+        gcloud functions deploy "{{.FUNCTION_NAME}}" \
+          --project="{{.PROJECT_ID}}" \
+          --region="{{.REGION}}" \
+          --gen2 \
+          --runtime="{{.RUNTIME}}" \
+          --source=src \
+          --entry-point=handle_request \
+          --service-account="{{.SERVICE_ACCOUNT}}" \
+          --set-env-vars="PROJECT_ID={{.PROJECT_ID}},KEYS_SECRET_NAME={{.KEYS_SECRET_NAME}},RETENTION_DAYS={{.RETENTION_DAYS}}" \
+          --trigger-http \
+          --allow-unauthenticated \
+          --memory=256Mi \
+          --max-instances=3 \
+          --concurrency=1
+      - 'echo "URL: $(gcloud functions describe {{.FUNCTION_NAME}} --project={{.PROJECT_ID}} --region={{.REGION}} --gen2 --format="value(url)")"'
+
+  logs:
+    desc: 'Tail recent function logs (ENV=dev|prod)'
+    cmds:
+      - gcloud functions logs read "{{.FUNCTION_NAME}}" --project="{{.PROJECT_ID}}" --region="{{.REGION}}" --gen2 --limit=50
