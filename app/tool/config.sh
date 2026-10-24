@@ -4,41 +4,16 @@
 #   android/app/google-services.json   (notifier_google_services_json)
 #   config/notifier.json               (NOTIFIER_URL, NOTIFIER_APP_KEY)
 #
-# Runs terraform in Docker like humeman/terraform's Taskfile. Credentials:
-# sa/csenneff-<env>.json in the terraform repo if present, otherwise your
-# gcloud login (needs read access to the state bucket).
+# Terraform access goes through scripts/tf-output.sh (see there for
+# credentials).
 #
 # Usage: config.sh <dev|prod> <path to humeman/terraform>
 set -euo pipefail
 
 ENV="${1:?Usage: config.sh <env> <terraform repo>}"
-TF_REPO="$(cd "${2:?Usage: config.sh <env> <terraform repo>}" && pwd)"
-TF_VERSION="$(cat "${TF_REPO}/.terraform-version")"
-SA="${TF_REPO}/sa/csenneff-${ENV}.json"
+TF_REPO="${2:?Usage: config.sh <env> <terraform repo>}"
 
-auth=()
-if [[ -f "${SA}" ]]; then
-  auth=(-e "GOOGLE_APPLICATION_CREDENTIALS=/workspace/sa/csenneff-${ENV}.json")
-else
-  auth=(
-    -e "GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)"
-    -e "GOOGLE_BILLING_PROJECT=csenneff-${ENV}"
-    -e "USER_PROJECT_OVERRIDE=true"
-  )
-fi
-
-tf() {
-  docker run --rm \
-    -v "${TF_REPO}":/workspace \
-    -v tf-plugin-cache:/root/.terraform.d/plugin-cache \
-    -e TF_PLUGIN_CACHE_DIR=/root/.terraform.d/plugin-cache \
-    "${auth[@]}" \
-    -w "/workspace/tf/projects/${ENV}" \
-    "hashicorp/terraform:${TF_VERSION}" "$@"
-}
-
-tf init -input=false >/dev/null
-outputs="$(tf output -json)"
+outputs="$("$(dirname "$0")/../../scripts/tf-output.sh" "${ENV}" "${TF_REPO}")"
 
 mkdir -p config
 python3 - "${outputs}" <<'PY'

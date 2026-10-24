@@ -22,6 +22,7 @@ notifications itself (`AlertNotifier.kt`), one channel per level.
 - `app/`: Flutter Android app (Android 17+). See `app/Taskfile.yml`.
 - `function/`: Cloud Run Function (Python). See `function/Taskfile.yml`.
 - `ci/scripts/`: deploy script shared by CI and `task function:deploy`.
+- `scripts/`: terraform-output helpers behind `task keys` and `task app:config`.
 
 ## api
 
@@ -56,6 +57,7 @@ under its folder name. Run `task` for the full list. Common targets:
 - `task function:run`: function on :8080 with an in-memory store and no FCM;
   keys are `local-homelab-key` / `local-backups-key` / `local-app-key`
 - `task function:deploy ENV=dev|prod`
+- `task keys PROJECT=csenneff-dev|csenneff-prod`: print the API keys
 
 The Test Notifications screen (flask icon) posts one local notification per
 level through the same native code a push will use.
@@ -104,13 +106,16 @@ URL doesn't answer `401` to an unauthenticated request afterwards.
 
 ### 3. get the keys
 
-From `tf/projects/<env>` in the terraform repo (same Docker/credentials setup
-as its Taskfile):
-
 ```sh
-terraform output -json notifier_system_keys   # {"homelab": "<key>", ...}
-terraform output -raw notifier_app_key
+task keys PROJECT=csenneff-prod
 ```
+
+Prints the function URL, each system's sender key, and the app key, read
+from terraform outputs (via `sa/csenneff-<env>.json` in the terraform repo
+if present, else your gcloud login). These are the plaintext keys: the
+`notifier-keys` secret in Secret Manager only holds their SHA-256 hashes
+(`{"systems": {"<hash>": "<name>"}, "app": "<hash>"}`), so it can't be used
+to send.
 
 Give each system its key; it sends `Authorization: Bearer <key>`. Adding or
 removing a system is a terraform change; the function picks up the new keys

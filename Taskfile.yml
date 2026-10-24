@@ -10,7 +10,18 @@ includes:
     taskfile: ./function/Taskfile.yml
     dir: ./function
 
+vars:
+  # humeman/terraform checkout, for tasks that read its outputs.
+  TF_REPO: '{{.TF_REPO | default (printf "%s/Code/terraform" .HOME)}}'
+
 tasks:
   default:
     cmds:
       - task --list
+
+  keys:
+    desc: 'Print the sender + app keys for a project (PROJECT=csenneff-dev|csenneff-prod)'
+    requires:
+      vars: [PROJECT]
+    cmds:
+      - scripts/keys.sh "{{.PROJECT}}" "{{.TF_REPO}}"
