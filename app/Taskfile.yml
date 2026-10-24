@@ -1,0 +1,146 @@
+version: '3'
+
+# The Flutter and Android SDKs are installed under ~/Apps (see `task app:doctor`).
+# Override these if yours live elsewhere.
+vars:
+  FLUTTER_HOME: '{{.FLUTTER_HOME | default (printf "%s/Apps/flutter" .HOME)}}'
+  ANDROID_SDK: '{{.ANDROID_SDK | default (printf "%s/Apps/android-sdk" .HOME)}}'
+  # AGP does not support JDK 25, which is this machine's default.
+  JAVA_HOME: '{{.JAVA_HOME_21 | default (printf "%s/Apps/jdk-21" .HOME)}}'
+  FLUTTER: '{{.FLUTTER_HOME}}/bin/flutter'
+  DART: '{{.FLUTTER_HOME}}/bin/dart'
+  APK: build/app/outputs/flutter-apk/app-release.apk
+  DIST: dist/notifier.apk
+  APP_ID: com.csenneff.notifier
+  # Pinned to the SDK's own adb, so a second copy on PATH can't conflict.
+  ADB: '{{.ANDROID_SDK}}/platform-tools/adb'
+  # Emulator. `task app:emulator:setup` downloads the image and creates the AVD.
+  AVD_NAME: '{{.AVD_NAME | default "notifier"}}'
+  AVD_DEVICE: '{{.AVD_DEVICE | default "pixel_8"}}'
+  SYSTEM_IMAGE: '{{.SYSTEM_IMAGE | default "system-images;android-37.0;google_apis;x86_64"}}'
+  EMULATOR_SERIAL: '{{.EMULATOR_SERIAL | default "emulator-5554"}}'
+
+env:
+  ANDROID_HOME: '{{.ANDROID_SDK}}'
+  ANDROID_SDK_ROOT: '{{.ANDROID_SDK}}'
+  JAVA_HOME: '{{.JAVA_HOME}}'
+
+tasks:
+  deps:
+    desc: 'Resolve Dart dependencies'
+    cmds:
+      - '{{.FLUTTER}} pub get'
+
+  build:
+    desc: 'Build the release APK into dist/'
+    deps: [deps]
+    cmds:
+      - '{{.FLUTTER}} build apk --release'
+      - mkdir -p dist
+      - cp "{{.APK}}" "{{.DIST}}"
+      - 'echo "APK: {{.DIST}} ($(du -h "{{.DIST}}" | cut -f1))"'
+
+  install:
+    desc: 'Build and install onto the connected device'
+    deps: [build]
+    cmds:
+      - '{{.ADB}} install -r "{{.DIST}}"'
+
+  run:
+    desc: 'Run on the connected device with hot reload'
+    deps: [deps]
+    cmds:
+      - '{{.FLUTTER}} run'
+
+  test:
+    desc: 'Run unit and widget tests'
+    deps: [deps]
+    cmds:
+      - '{{.FLUTTER}} test'
+
+  analyze:
+    desc: 'Static analysis'
+    deps: [deps]
+    cmds:
+      - '{{.FLUTTER}} analyze'
+
+  format:
+    desc: 'Format all Dart sources'
+    cmds:
+      - '{{.DART}} format lib test'
+
+  icon:
+    desc: 'Regenerate the launcher icon from tool/make_icon.py'
+    deps: [deps]
+    cmds:
+      - python3 tool/make_icon.py
+      - '{{.DART}} run flutter_launcher_icons'
+
+  doctor:
+    desc: 'Check the local Flutter/Android toolchain'
+    cmds:
+      - '{{.FLUTTER}} doctor -v'
+
+  clean:
+    desc: 'Remove build output'
+    cmds:
+      - '{{.FLUTTER}} clean'
+      - rm -rf dist
+
+  emulator:
+    desc: 'Boot the emulator and run the app on it'
+    cmds:
+      - task: emulator:setup
+      - task: emulator:start
+      - '{{.FLUTTER}} run -d {{.EMULATOR_SERIAL}}'
+
+  emulator:setup:
+    desc: 'Install the emulator + Android 17 image and create the AVD (one-time)'
+    status:
+      - test -d "$HOME/.android/avd/{{.AVD_NAME}}.avd"
+    cmds:
+      - |
+        yes | "{{.ANDROID_SDK}}/cmdline-tools/latest/bin/sdkmanager" \
+          --install "emulator" "platforms;android-37.0" "{{.SYSTEM_IMAGE}}"
+      - |
+        echo no | "{{.ANDROID_SDK}}/cmdline-tools/latest/bin/avdmanager" \
+          create avd -n "{{.AVD_NAME}}" -k "{{.SYSTEM_IMAGE}}" -d "{{.AVD_DEVICE}}" --force
+
+  emulator:start:
+    desc: 'Boot the emulator and wait until it is ready'
+    status:
+      # Skip if a device is already booted, so this is safe to chain.
+      - '[ "$({{.ADB}} shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]'
+    cmds:
+      # Detached, with stdio dropped, so the emulator outlives this task.
+      - |
+        nohup "{{.ANDROID_SDK}}/emulator/emulator" -avd "{{.AVD_NAME}}" \
+          -gpu auto -no-boot-anim -no-snapshot-save \
+          >/dev/null 2>&1 &
+      - '{{.ADB}} wait-for-device'
+      - |
+        echo "Waiting for Android to finish booting..."
+        for _ in $(seq 1 120); do
+          if [ "$({{.ADB}} shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+            echo "Emulator ready."
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "Emulator did not finish booting in time." >&2
+        exit 1
+
+  emulator:install:
+    desc: 'Build the release APK and install + launch it on the emulator'
+    cmds:
+      # Build before booting, so Gradle and the emulator don't peak together.
+      - task: build
+      - task: emulator:setup
+      - task: emulator:start
+      - '{{.ADB}} install -r "{{.DIST}}"'
+      - '{{.ADB}} shell am start -n {{.APP_ID}}/.MainActivity'
+
+  emulator:stop:
+    desc: 'Shut the emulator down'
+    cmds:
+      - '{{.ADB}} emu kill || true'

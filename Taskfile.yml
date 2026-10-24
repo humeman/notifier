@@ -1,0 +1,13 @@
+version: '3'
+
+# Each component owns its own Taskfile; this one just namespaces them, e.g.
+# `task app:build`, `task app:emulator:install`.
+includes:
+  app:
+    taskfile: ./app/Taskfile.yml
+    dir: ./app
+
+tasks:
+  default:
+    cmds:
+      - task --list
